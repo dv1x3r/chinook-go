@@ -1,6 +1,6 @@
 {
-  "name": "Demo CRM",
-  "short_name": "Demo CRM",
+  "name": "Chinook Go",
+  "short_name": "Chinook Go",
   "theme_color": "#27272a",
   "background_color": "#27272a",
   "display": "standalone"

@@ -2,216 +2,149 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
+	"syscall"
 	"time"
 
-	"gostart-crm/internal/config"
-	"gostart-crm/internal/lib/db"
-	"gostart-crm/internal/lib/logger"
-	"gostart-crm/internal/lib/validator"
-	"gostart-crm/internal/random/discount"
-	"gostart-crm/internal/template"
-	"gostart-crm/migrations"
-	"gostart-crm/web"
+	"github.com/dv1x3r/chinook-go/data"
+	"github.com/dv1x3r/chinook-go/web"
 
-	"gostart-crm/internal/catalog/attribute"
-	"gostart-crm/internal/catalog/brand"
-	"gostart-crm/internal/catalog/category"
-	"gostart-crm/internal/catalog/product"
-	"gostart-crm/internal/catalog/product_status"
-	"gostart-crm/internal/catalog/supplier"
+	"github.com/dv1x3r/chinook-go/internal/api"
+	apiroutes "github.com/dv1x3r/chinook-go/internal/api/routes"
+	apiservices "github.com/dv1x3r/chinook-go/internal/api/services"
 
-	"gostart-crm/internal/checkout/order"
-	"gostart-crm/internal/checkout/order_status"
-	"gostart-crm/internal/checkout/payment_method"
+	"github.com/dv1x3r/chinook-go/internal/storefront"
+	storefrontservices "github.com/dv1x3r/chinook-go/internal/storefront/services"
 
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	"github.com/dv1x3r/chinook-go/internal/config"
+	"github.com/dv1x3r/chinook-go/internal/lib/db"
+	"github.com/dv1x3r/chinook-go/internal/lib/logger"
+
+	"github.com/dv1x3r/w2go/w2"
+	"github.com/dv1x3r/w2go/w2db"
+	"github.com/dv1x3r/w2go/w2lib"
+	"github.com/huandu/go-sqlbuilder"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 )
 
 func main() {
-	config := config.GetConfig()
+	cfg := config.MustLoad()
 
-	if config.Debug {
+	// ── Logger ──────────────────────────────────────────────────────────────────
+	if cfg.JsonLogger {
+		logger.Create(logger.JsonHandler)
+	} else {
+		logger.Create(logger.TextHandler)
+	}
+	if cfg.Debug {
 		logger.SetLevel(slog.LevelDebug)
 	}
 
-	store, err := db.NewStore(config.DBDriver, config.DBString)
-	if err != nil {
-		logger.GetLogger().Error("unable to connect to the database", "err", err)
+	// ── Database store ──────────────────────────────────────────────────────────
+	store := db.NewSQLiteStore(logger.Get(), cfg.DBString)
+	if err := store.Open(); err != nil {
+		logger.Get().Error("unable to connect to the database", "err", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	if err := store.MigrateFile(data.FS, "sql/base.sql"); err != nil {
+		logger.Get().Error("unable to initialize the database", "err", err)
 		os.Exit(1)
 	}
 
-	if err := db.MigrateUp(logger.GetLogger(), config.DBDriver, store.DB(), migrations.MigrationsFS, "."); err != nil {
-		logger.GetLogger().Error("unable to migrate the database", "err", err)
+	if err := store.MigrateUp(data.FS, "sql/updates"); err != nil {
+		logger.Get().Error("unable to migrate the database", "err", err)
 		os.Exit(1)
 	}
 
-	e := echo.New()
-	e.HideBanner = true
-	e.Debug = config.Debug
-	e.Validator = validator.GetValidator()
+	w2db.SetFlavor(sqlbuilder.SQLite)
 
-	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		LogRemoteIP: true,
-		LogMethod:   true,
-		LogHost:     true,
-		LogURI:      true,
-		LogStatus:   true,
-		LogLatency:  true,
-		LogError:    true,
-		HandleError: true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			if v.Error == nil {
-				logger.GetLogger().Info("REQUEST",
-					slog.String("remote_ip", v.RemoteIP),
-					slog.String("method", v.Method),
-					slog.String("host", v.Host),
-					slog.String("uri", v.URI),
-					slog.Int("status", v.Status),
-					slog.String("latency", fmt.Sprintf("%s", v.Latency)),
-				)
-			} else {
-				logger.GetLogger().Error("REQUEST_ERROR",
-					slog.String("remote_ip", v.RemoteIP),
-					slog.String("method", v.Method),
-					slog.String("host", v.Host),
-					slog.String("uri", v.URI),
-					slog.Int("status", v.Status),
-					slog.String("latency", fmt.Sprintf("%s", v.Latency)),
-					slog.String("err", v.Error.Error()),
-				)
-			}
-			return nil
-		},
-	}))
+	// ── Server ──────────────────────────────────────────────────────────────────
+	e := echo.NewWithConfig(echo.Config{
+		Logger:      logger.Get(),
+		IPExtractor: echo.ExtractIPFromXFFHeader(),
+	})
 
-	e.Use(middleware.CSRFWithConfig(middleware.CSRFConfig{
-		TokenLookup:    "header:X-CSRF-Token",
-		CookieName:     "csrftoken",
-		CookiePath:     "/",
-		CookieMaxAge:   86400,
-		CookieHTTPOnly: true,
-		CookieSameSite: http.SameSiteStrictMode,
-	}))
-
-	e.Use(middleware.BodyLimit("30M"))
-	e.Use(middleware.Recover())
-	e.Use(middleware.Secure())
-	e.Use(middleware.Gzip())
-
-	static := e.Group("", addCacheControlHeader("public, max-age=86400"))
-	static.StaticFS("/admin.js", echo.MustSubFS(web.WebFS, "dist/admin.js"))
-	static.StaticFS("/admin.css", echo.MustSubFS(web.WebFS, "dist/admin.css"))
-	static.StaticFS("/client.js", echo.MustSubFS(web.WebFS, "dist/client.js"))
-	static.StaticFS("/client.css", echo.MustSubFS(web.WebFS, "dist/client.css"))
-	static.StaticFS("/site.webmanifest", echo.MustSubFS(web.WebFS, "static/site.webmanifest"))
-
-	api := e.Group("", readOnlyMiddleware(config.ReadOnly))
-
-	attributeRepo := attribute.NewSQLiteRepository(store)
-	attributeService := attribute.NewService(attributeRepo)
-	attributeHandler := attribute.NewHandler(attributeService)
-	attributeHandler.Register(api.Group("/attribute"))
-
-	brandRepo := brand.NewSQLiteRepository(store)
-	brandService := brand.NewService(brandRepo)
-	brandHandler := brand.NewHandler(brandService)
-	brandHandler.Register(api.Group("/brand"))
-
-	categoryRepo := category.NewSQLiteRepository(store)
-	categoryService := category.NewService(categoryRepo)
-	categoryHandler := category.NewHandler(categoryService)
-	categoryHandler.Register(api.Group("/category"))
-
-	supplierRepo := supplier.NewSQLiteRepository(store)
-	supplierService := supplier.NewService(supplierRepo)
-	supplierHandler := supplier.NewHandler(supplierService)
-	supplierHandler.Register(api.Group("/supplier"))
-
-	productRepo := product.NewSQLiteRepository(store)
-	productService := product.NewService(productRepo)
-	productHandler := product.NewHandler(productService)
-	productHandler.Register(api.Group("/product"))
-
-	productStatusRepo := productstatus.NewSQLiteRepository(store)
-	productStatusService := productstatus.NewService(productStatusRepo)
-	productStatusHandler := productstatus.NewHandler(productStatusService)
-	productStatusHandler.Register(api.Group("/product/status"))
-
-	orderRepo := order.NewSQLiteRepository(store)
-	orderService := order.NewService(orderRepo)
-	orderHandler := order.NewHandler(orderService)
-	orderHandler.Register(api.Group("/order"))
-
-	orderStatusRepo := orderstatus.NewSQLiteRepository(store)
-	orderStatusService := orderstatus.NewService(orderStatusRepo)
-	orderStatusHandler := orderstatus.NewHandler(orderStatusService)
-	orderStatusHandler.Register(api.Group("/order/status"))
-
-	paymentMethodRepo := paymentmethod.NewSQLiteRepository(store)
-	paymentMethodService := paymentmethod.NewService(paymentMethodRepo)
-	paymentMethodHandler := paymentmethod.NewHandler(paymentMethodService)
-	paymentMethodHandler.Register(api.Group("/payment/method"))
-
-	discountHandler := discount.NewHandler()
-	discountHandler.Register(e.Group(""))
-
-	templateHandler := template.NewHandler(
-		categoryService,
-		productService,
-		productStatusService,
+	e.Use(
+		middleware.RequestLogger(),
+		middleware.Recover(),
+		middleware.RequestID(),
+		middleware.Secure(),
 	)
-	templateHandler.Register(e.Group(""))
 
-	go startServer(e, config.ServerAddress)
-	select {}
+	// ── Static assets ───────────────────────────────────────────────────────────
+	// w2ui ships with w2go, the admin pages are plain modules loaded from /admin
+	scripts := e.Group("", cacheControl(cacheRevalidate))
+	scripts.StaticFS("/lib", echo.MustSubFS(w2lib.FS(), "."))
+	scripts.StaticFS("/admin", echo.MustSubFS(web.FS, "admin"))
+
+	// the storefront bundle carries a content hash, so it can be cached forever
+	bundle := e.Group("", cacheControl(cacheImmutable))
+	bundle.StaticFS("/"+web.CLIENT_JS, echo.MustSubFS(web.FS, "client/dist/"+web.CLIENT_JS))
+	bundle.StaticFS("/"+web.CLIENT_CSS, echo.MustSubFS(web.FS, "client/dist/"+web.CLIENT_CSS))
+
+	static := e.Group("", cacheControl(cacheStatic))
+	static.StaticFS("/site.webmanifest", echo.MustSubFS(web.FS, "static/site.webmanifest"))
+
+	// ── Admin API ───────────────────────────────────────────────────────────────
+	apiSvc := apiservices.NewService(logger.Get(), store, cfg)
+	apiHandler := apiroutes.NewHandler(apiSvc)
+	api.Register(e, apiHandler, store, cfg.Debug, readOnlyMiddleware(cfg.ReadOnly))
+
+	// ── Storefront ──────────────────────────────────────────────────────────────
+	storefrontSvc := storefrontservices.NewService(logger.Get(), store, cfg)
+	storefront.NewHandler(storefrontSvc).Register(e.Group("", cacheControl(cachePrivate)))
+
+	startServer(e, cfg.ServerAddress)
 }
 
-func addCacheControlHeader(value string) echo.MiddlewareFunc {
+func startServer(e *echo.Echo, address string) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	sc := echo.StartConfig{
+		Address:         address,
+		GracefulTimeout: 10 * time.Second,
+		HideBanner:      true,
+		HidePort:        true,
+	}
+	if err := sc.Start(ctx, e); err != nil {
+		e.Logger.Error("failed to start server", "err", err)
+	}
+}
+
+const (
+	// the file name carries a content hash, so this URL can never go stale
+	cacheImmutable = "public, max-age=31536000, immutable"
+	// unversioned but seldom touched: favicons, bundled images
+	cacheStatic = "public, max-age=86400"
+	// embedded assets ship unversioned, so they are stored but always revalidated
+	cacheRevalidate = "no-cache"
+	// rendered pages differ per visitor: cart counter, hidden categories, payment methods
+	cachePrivate = "private, no-cache"
+)
+
+func cacheControl(value string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			c.Response().Header().Set(echo.HeaderCacheControl, value)
 			return next(c)
 		}
 	}
 }
 
+// the public demo runs without a login, so writes are simply turned off
 func readOnlyMiddleware(readOnly bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			if readOnly && c.Request().Method != "GET" {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"status": "error", "message": "Demo works in read-only mode"})
+		return func(c *echo.Context) error {
+			if readOnly && c.Request().Method != http.MethodGet {
+				return c.JSON(http.StatusUnauthorized, w2.NewErrorResponse("Demo works in read-only mode"))
 			}
-
 			return next(c)
 		}
-	}
-}
-
-func startServer(e *echo.Echo, address string) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
-	go func() {
-		address = strings.TrimPrefix(address, "tcp://")
-		if err := e.Start(address); err != nil && err != http.ErrServerClosed {
-			e.Logger.Fatal("shutting down the server: ", err)
-		}
-	}()
-
-	// Wait for interrupt signal to gracefully shutdown the server with a timeout of 10 seconds.
-	<-ctx.Done()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := e.Shutdown(ctx); err != nil {
-		e.Logger.Fatal(err)
 	}
 }

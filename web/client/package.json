@@ -1,0 +1,10 @@
+{
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.11",
+    "htmx.org": "4.0.0",
+    "tailwindcss": "^3.4.19",
+    "alpinejs": "^3.17.4",
+    "@alpinejs/anchor": "^3.17.4",
+    "@alpinejs/focus": "^3.17.4"
+  }
+}

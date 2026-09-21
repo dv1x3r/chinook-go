@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/http"
 )
 
 // Event represents Server-Sent Event.
@@ -73,5 +74,17 @@ func (ev *Event) MarshalTo(w io.Writer) error {
 		return err
 	}
 
+	return nil
+}
+
+// Flush flushes Event to given ResponseWriter
+func (ev *Event) Flush(w http.ResponseWriter) error {
+	if err := ev.MarshalTo(w); err != nil {
+		return err
+	}
+	controller := http.NewResponseController(w)
+	if err := controller.Flush(); err != nil {
+		return err
+	}
 	return nil
 }

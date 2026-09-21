@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* https://github.com/tailwindlabs/tailwindcss/discussions/12127 */
+@supports not (overflow-wrap: anywhere) {
+  .break-anywhere {
+    word-break: break-word;
+  }
+}
+
+@supports (overflow-wrap: anywhere) {
+  .break-anywhere {
+    overflow-wrap: anywhere;
+  }
+}
+
+[x-cloak]:not([x-cloak="mobile"]) {
+  display: none !important;
+}
+
+@media not all and (min-width: 768px) {
+  [x-cloak="mobile"] {
+    display: none !important;
+  }
+}
+
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 500ms ease-in;
+}
+
+.htmx-request .htmx-indicator {
+  opacity: 1
+}
+
+.htmx-request.htmx-indicator {
+  opacity: 1
+}

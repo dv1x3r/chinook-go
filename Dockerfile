@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG GO_VERSION="1.24-alpine"
+ARG GO_VERSION="1.27-alpine"
 
 FROM golang:${GO_VERSION} AS build
 
@@ -12,9 +12,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -tags "fts5" -o ./build/server ./cmd/server
-
-RUN go test -v ./...
+RUN CGO_ENABLED=0 go build -o ./build/server ./cmd/server
 
 FROM alpine:latest
 
@@ -22,6 +20,6 @@ WORKDIR /app
 
 RUN apk --no-cache add ca-certificates tzdata
 
-COPY --from=build /app/build/server /app/gostart-crm
+COPY --from=build /app/build/server /app/chinook-go
 
-CMD ["/app/gostart-crm"]
+CMD ["/app/chinook-go"]

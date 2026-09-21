@@ -47,11 +47,11 @@ func MigrateBase(logger *slog.Logger, db *sql.DB, fsys fs.FS, sqlFilePath string
 	return nil
 }
 
-func MigrateUp(logger *slog.Logger, driver string, db *sql.DB, fsys fs.FS, dir string) error {
+func MigrateUp(logger *slog.Logger, db *sql.DB, fsys fs.FS, dir string) error {
 	goose.SetLogger(gLogger{Logger: *logger})
 	goose.SetBaseFS(fsys)
 
-	if err := goose.SetDialect(driver); err != nil {
+	if err := goose.SetDialect("sqlite"); err != nil {
 		return err
 	}
 

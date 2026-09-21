@@ -24,10 +24,15 @@ go.work.sum
 # Binaries
 /tmp
 /build
-/node_modules
 
-# env files
-.env
+# Database
+/data_db
+
+# Environment
 .DS_Store
-.ipynb_checkpoints
+.env
+.idea/
+.vscode/
+.ipynb_checkpoints/
+node_modules/
 

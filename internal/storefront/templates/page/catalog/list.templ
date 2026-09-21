@@ -1,0 +1,172 @@
+package catalog
+
+import (
+	"fmt"
+	"github.com/dv1x3r/chinook-go/internal/storefront/services"
+	"github.com/dv1x3r/chinook-go/internal/storefront/templates/component/button"
+	"github.com/dv1x3r/chinook-go/internal/storefront/templates/component/form"
+	"github.com/dv1x3r/chinook-go/internal/storefront/templates/component/sidebar"
+	"github.com/dv1x3r/chinook-go/internal/storefront/templates/component/table"
+	"github.com/dv1x3r/chinook-go/internal/storefront/templates/layout"
+)
+
+type Props struct {
+	Playlists  []services.Playlist
+	Genres     []services.Genre
+	MediaTypes []services.MediaType
+	Tracks     []services.Track
+	Request    services.TrackRequest
+	PlaylistID int
+	AllTracks  int
+	Title      string
+	Total      int
+	Path       string
+}
+
+templ List(props Props) {
+	@layout.Base() {
+		<div class="flex flex-col sm:flex-row sm:h-screen min-w-[320px]">
+			@sidebar.Sidebar(sidebar.Props{Playlists: props.Playlists, PlaylistID: props.PlaylistID, AllTracks: props.AllTracks})
+			<main
+				id="hx-main"
+				x-data="{ table: { selected: [], filters: {}, count: 0 } }"
+				class="flex-1 min-w-0 min-h-0 flex flex-col gap-4 p-4 bg-zinc-900 sm:my-2 sm:mr-2 sm:rounded-lg sm:shadow-lg"
+			>
+				<header>
+					<h1 class="text-3xl font-extrabold truncate">{ props.Title }</h1>
+					<p class="text-sm text-zinc-400">{ fmt.Sprintf("%d %s", props.Total, plural("track", props.Total)) }</p>
+				</header>
+				@Toolbar(props)
+				@Table(props)
+			</main>
+		</div>
+	}
+}
+
+templ Toolbar(props Props) {
+	<div class="flex items-center gap-2">
+		@button.Button(button.Props{
+			Icon:     "fa fa-rotate",
+			Variant:  "ghost",
+			SpinIcon: true,
+			Attributes: templ.Attributes{
+				"type":      "button",
+				"title":     "Reload",
+				"hx-get":    props.Path,
+				"hx-select": "#hx-main",
+				"hx-target": "#hx-main",
+				"hx-swap":   "outerHTML",
+			},
+		})
+		@form.Search(form.SearchProps{
+			SearchBy:    []string{"Track", "Album", "Artist", "Composer"},
+			Selected:    props.Request.SearchBy,
+			Placeholder: "Search...",
+			Attributes: templ.Attributes{
+				"value":      props.Request.Search,
+				"hx-get":     props.Path,
+				"hx-select":  "#hx-table tbody",
+				"hx-target":  "#hx-table tbody",
+				"hx-swap":    "outerHTML",
+				"hx-include": "[name='search-by']",
+				"hx-vals":    filtersVals,
+				"hx-trigger": "change from:select[name=search-by], input changed delay:300ms",
+				"hx-sync":    "this:replace",
+			},
+		})
+	</div>
+}
+
+templ Table(props Props) {
+	<div id="hx-table" class="relative flex-1 sm:min-h-36">
+		<div class="sm:absolute sm:inset-0">
+			@table.Table(table.TableProps{
+				Attributes: templ.Attributes{"x-model": "table", "id": "hx-table-model"},
+				Columns: []table.Column{
+					{Label: "Track"},
+					{Label: "Album"},
+					{Label: "Artist"},
+					{Label: "Composer"},
+					{Label: "Genre", Field: "genre", Filters: genreFilters(props.Genres)},
+					{Label: "Media", Field: "media", Filters: mediaFilters(props.MediaTypes)},
+					{Label: "Length", AddClass: "text-right"},
+					{Label: "Size", AddClass: "text-right"},
+					{Label: "Price", AddClass: "text-right"},
+					{IsBlank: true},
+				},
+				ColumnAttributes: templ.Attributes{
+					"hx-get":     props.Path,
+					"hx-select":  "#hx-table tbody",
+					"hx-target":  "#hx-table tbody",
+					"hx-swap":    "outerHTML",
+					"hx-include": "[name='search'],[name='search-by']",
+					"hx-vals":    filtersVals,
+					"hx-sync":    "this:replace",
+				},
+			}) {
+				@Rows(props)
+			}
+		</div>
+	</div>
+}
+
+templ Rows(props Props) {
+	for i, track := range props.Tracks {
+		@table.Row(table.RowProps{
+			HXInfiniteScroll: &table.HXInfiniteScrollProps{
+				IsLastRow: len(props.Tracks) == i+1,
+				NextURL:   props.Path,
+				NextParam: "offset",
+				NextValue: fmt.Sprint(props.Request.Offset + len(props.Tracks)),
+				Attributes: templ.Attributes{
+					"hx-include": "[name='search'],[name='search-by']",
+					"hx-vals":    filtersVals,
+				},
+			},
+		}) {
+			@table.Cell() {
+				<div class="text-sm font-medium line-clamp-2">{ track.Name }</div>
+				<div class="text-xs text-zinc-500 tabular-nums">{ fmt.Sprintf("#%d", track.ID) }</div>
+			}
+			@table.CellWithValue(track.Album)
+			@table.CellWithValue(track.Artist)
+			@table.CellWithValue(track.Composer)
+			@table.Cell() {
+				if track.Genre != "" {
+					<span class="text-xs px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-100 whitespace-nowrap">{ track.Genre }</span>
+				}
+			}
+			@table.CellWithValue(track.Media)
+			@table.Cell() {
+				<div class="text-xs text-right tabular-nums">{ length(track.Length) }</div>
+			}
+			@table.Cell() {
+				<div class="text-xs text-right tabular-nums whitespace-nowrap">{ size(track.Bytes) }</div>
+			}
+			@table.Cell() {
+				<div class="text-xs text-right tabular-nums">{ fmt.Sprintf("%.2f", track.Price) }</div>
+			}
+			@table.CellWithDropdown() {
+				@searchButton(props, "Tracks of the artist", "fa fa-user", "Artist", track.Artist)
+				@searchButton(props, "Tracks of the album", "fa fa-compact-disc", "Album", track.Album)
+			}
+		}
+	}
+}
+
+templ searchButton(props Props, label string, icon string, by string, value string) {
+	@button.Button(button.Props{
+		Label:   label,
+		Icon:    icon,
+		Variant: "ghost",
+		AddClass: "w-full",
+		Attributes: templ.Attributes{
+			"type":        "button",
+			"hx-get":      searchLink(props, by, value),
+			"hx-select":   "#hx-main",
+			"hx-target":   "#hx-main",
+			"hx-swap":     "outerHTML",
+			"hx-push-url": "true",
+		},
+	})
+}

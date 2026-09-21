@@ -1,0 +1,24 @@
+package layout
+
+import "github.com/dv1x3r/chinook-go/web"
+
+templ Base() {
+	<!DOCTYPE html>
+	<html lang="en" class="dark">
+		<head>
+			<title>Chinook Go</title>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<link rel="manifest" href="/site.webmanifest"/>
+			<link rel="preconnect" href="https://fonts.googleapis.com"/>
+			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+			<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap"/>
+			<link rel="stylesheet" type="text/css" href="/lib/font-awesome/css/all.min.css"/>
+			<link rel="stylesheet" href={ "/" + web.CLIENT_CSS }/>
+			<script type="module" src={ "/" + web.CLIENT_JS }></script>
+		</head>
+		<body class="bg-zinc-800 text-zinc-50 antialiased">
+			{ children... }
+		</body>
+	</html>
+}

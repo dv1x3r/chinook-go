@@ -1,0 +1,92 @@
+package sidebar
+
+import (
+	"fmt"
+	"github.com/dv1x3r/chinook-go/internal/storefront/services"
+)
+
+type Props struct {
+	Playlists  []services.Playlist
+	PlaylistID int
+	AllTracks  int
+}
+
+templ Sidebar(props Props) {
+	<aside class="sm:w-64 shrink-0">
+		<section
+			x-data="{ open: window.innerWidth > 639 }"
+			@resize.window.debounce.100="open = window.innerWidth > 639"
+			class="sm:w-64 sm:fixed sm:inset-y-0 p-2 sm:overflow-y-auto flex flex-col gap-4"
+		>
+			<header class="flex items-center justify-between gap-2 px-2 pt-1">
+				<a href="/" class="min-w-0">
+					<div class="font-semibold truncate">Chinook Go</div>
+					<div class="text-xs text-zinc-400 truncate">sqlite sample database</div>
+				</a>
+				<button
+					@click="open = !open"
+					type="button"
+					aria-label="Toggle the menu"
+					class="sm:hidden size-8 flex items-center justify-center rounded text-zinc-300 hover:bg-zinc-700 transition"
+				>
+					<span class="fa" :class="open ? 'fa-xmark' : 'fa-bars'" aria-hidden="true"></span>
+				</button>
+			</header>
+			// boosted links swap the whole page without a reload, the active item comes with it
+			<nav x-show="open" x-transition x-cloak="mobile" hx-boost:inherited="true" class="flex-1 flex flex-col gap-4">
+				@group("Library") {
+					@item("/", "All tracks", "fa fa-music", props.AllTracks, props.PlaylistID == 0)
+				}
+				@group("Playlists") {
+					for _, playlist := range props.Playlists {
+						@item(fmt.Sprintf("/playlist/%d", playlist.ID), playlist.Name, "fa fa-list", playlist.Tracks, playlist.ID == props.PlaylistID)
+					}
+				}
+				<div class="mt-auto">
+					@group("Project") {
+						@external("/admin", "w2ui admin", "fa fa-gears")
+						@external("https://github.com/dv1x3r/chinook-go", "GitHub", "fa-brands fa-github")
+					}
+				</div>
+			</nav>
+		</section>
+	</aside>
+}
+
+templ group(label string) {
+	<div>
+		<h2 class="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">{ label }</h2>
+		<div class="space-y-0.5">
+			{ children... }
+		</div>
+	</div>
+}
+
+templ item(link string, label string, icon string, count int, active bool) {
+	<a
+		href={ templ.SafeURL(link) }
+		class={
+			"group flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition active:scale-[0.98]",
+			templ.KV("bg-zinc-700 text-white", active),
+			templ.KV("text-zinc-300 hover:bg-zinc-700/50 hover:text-white", !active),
+		}
+	>
+		<span class={ icon, "w-4 text-center text-zinc-400" } aria-hidden="true"></span>
+		<span class="flex-1 truncate">{ label }</span>
+		// the count gives way to a spinner while the page loads
+		<span class="text-xs tabular-nums text-zinc-500 group-[.htmx-request]:hidden">{ fmt.Sprint(count) }</span>
+		<span class="hidden group-[.htmx-request]:inline-block fa fa-spinner animate-spin text-xs text-zinc-400" aria-hidden="true"></span>
+	</a>
+}
+
+templ external(link string, label string, icon string) {
+	<a
+		href={ templ.SafeURL(link) }
+		target="_blank"
+		class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700/50 hover:text-white transition"
+	>
+		<span class={ icon, "w-4 text-center text-zinc-400" } aria-hidden="true"></span>
+		<span class="flex-1 truncate">{ label }</span>
+		<span class="fa fa-arrow-up-right-from-square text-xs text-zinc-500" aria-hidden="true"></span>
+	</a>
+}

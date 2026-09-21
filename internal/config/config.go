@@ -3,27 +3,43 @@ package config
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	_ "github.com/joho/godotenv/autoload"
 )
 
+var (
+	loaded Config
+	once   sync.Once
+)
+
 type Config struct {
 	Debug         bool
+	JsonLogger    bool
 	ReadOnly      bool
 	ServerAddress string
-	DBDriver      string
 	DBString      string
 }
 
-func GetConfig() Config {
-	config := Config{
+func Get() Config {
+	return MustLoad()
+}
+
+func MustLoad() Config {
+	once.Do(func() {
+		loaded = load()
+	})
+	return loaded
+}
+
+func load() Config {
+	return Config{
 		Debug:         getenv("DEBUG", false) == "1",
+		JsonLogger:    getenv("JSON_LOGGER", false) == "1",
 		ReadOnly:      getenv("READ_ONLY", false) == "1",
 		ServerAddress: getenv("SERVER_ADDRESS", true),
-		DBDriver:      getenv("DB_DRIVER", true),
 		DBString:      getenv("DB_STRING", true),
 	}
-	return config
 }
 
 func getenv(key string, required bool) string {
